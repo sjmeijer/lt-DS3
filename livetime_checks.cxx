@@ -62,6 +62,7 @@ int livetime_checks(int runNumber)
   vector<double>* trapECal = 0;
   vector<double>* trapENFCal = 0;
   vector<double>* trapENFDBSGCal = 0;
+  vector<string>* detName = 0;
   Double_t        startTime = 0;
   Double_t        stopTime = 0;
   vector<double>* energyCal = 0;
@@ -90,40 +91,7 @@ int livetime_checks(int runNumber)
     }
   }
 
-  // this is the list of ALL channels that were ever available in M1/P3JDY?.
-  // float IDs[100] = {	576, 577,
-  //   584, 585,
-  //   592, 593,
-  //   594, 595,
-  //   598, 599,
-  //   600, 601,
-  //   608, 609,
-  //   610, 611,
-  //   614, 615,
-  //   616, 617,
-  //   624, 625,
-  //   626, 627,
-  //   628, 629,
-  //   630, 631,
-  //   632, 633,
-  //   640, 641,
-  //   642, 643,
-  //   644, 645,
-  //   646, 647,
-  //   656, 657,
-  //   662, 663,
-  //   664, 665,
-  //   674, 675,
-  //   676, 677,
-  //   680, 681,
-  //   688, 689,
-  //   690, 691,
-  //   692, 693,
-  //   696, 697
-  // };
-
   uint32_t numChannels = IDs.size(); //58; // 51;//enabledIDs.size();
-  // std::vector<double> lastTimestamp;  // lastTimestamp[IDs[n]]
   std::map<int,double> lastTimestamp;   // lastTimestamp[anID]
 
   for(int iCh=0; iCh<numChannels; iCh++)
@@ -145,6 +113,7 @@ int livetime_checks(int runNumber)
   gChain->SetBranchAddress("trapECal", &trapECal);
   gChain->SetBranchAddress("trapENFCal", &trapENFCal);
   gChain->SetBranchAddress("trapENFDBSGCal",&trapENFDBSGCal);
+  gChain->SetBranchAddress("detName",&detName);
   gChain->SetBranchAddress("startTime", &startTime);
   gChain->SetBranchAddress("stopTime", &stopTime);
 
@@ -159,6 +128,7 @@ int livetime_checks(int runNumber)
   skimTree->Branch("trapECal",&trapECal);
   skimTree->Branch("trapENFCal",&trapENFCal);
   skimTree->Branch("trapENFDBSGCal",&trapENFDBSGCal);
+  skimTree->Branch("detName",&detName);
   skimTree->Branch("startTime", &startTime);
   skimTree->Branch("stopTime", &stopTime);
   // calculated vars
@@ -190,7 +160,6 @@ int livetime_checks(int runNumber)
     std::map<int,int> eventCount;
     std::map<int,int> eventHi;  // eventHi[hiChan]
     std::map<int,int> eventLo;  // eventLo[hiChan]
-    // std::vector<int> presentKeys; // list channels present (only HG ch shown, regardless of which/both is actually present)
 
     int numHits = channel->size();
     if(iEvent%10000==0)
