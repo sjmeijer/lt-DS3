@@ -100,7 +100,7 @@ int livetime_checks(int runNumber)
     lastTimestamp[ch] = 0;
   }
 
-  std::cout << "Predefined the ID list to include all possible channels for P3JDY" << std::endl;
+  std::cout << "Automatically filled the ID list to include all enabled channels for dataset" << std::endl;
 
 
 
@@ -156,10 +156,10 @@ int livetime_checks(int runNumber)
     if(iEvent%10000==0)
       {std::cout << "  got event: " << iEvent << std::endl;}
 
-    std::map<int,int> eventChans; // eventChans[hiChan] gives the number of events in hi/lo for detector
-    std::map<int,int> eventCount;
-    std::map<int,int> eventHi;  // eventHi[hiChan]
-    std::map<int,int> eventLo;  // eventLo[hiChan]
+    std::map<std::string,int> eventChans; // eventChans[hiChan] gives the number of events in hi/lo for detector
+    std::map<std::string,int> eventCount;
+    std::map<std::string,int> eventHi;  // eventHi[hiChan]
+    std::map<std::string,int> eventLo;  // eventLo[hiChan]
 
     int numHits = channel->size();
     if(iEvent%10000==0)
@@ -174,18 +174,13 @@ int livetime_checks(int runNumber)
     {
       int channelNum = channel->at(ich);
       int chanKey = channelNum - channelNum%2;  // this is the HG for the detector
-      if(chanKey == channelNum) // if even number, it is HG
-      {
-        hg->at(ich) = 1;
-        lg->at(ich) = 0;
-      }
-      else                    // if odd number, it is LG
-      {
-        hg->at(ich) = 0;
-        lg->at(ich) = 1;
-      }
-      eventCount[chanKey] += 1;
-      eventChans[chanKey]+=(hg->at(ich)+(2*lg->at(ich)) - 1); // 0:HG-only, 1:LG-only, 2: both
+      std::string name = detName->at(ich);
+
+      hg->at(ich) = (channelNum%2)?0:1; // hg is 1 if channelNum is even, else 0
+      lg->at(ich) = (channelNum%2)?1:0; // lg is 1 if channelNum is odd, else 0
+
+      eventCount[name] += 1;
+      eventChans[name] += 2*lg->at(ich) + hg->at(ich); // 0:HG-only, 1:LG-only, 2: both
       // eventHi[chanKey] += hg->at(ich);
       // eventLo[chanKey] += lg->at(ich);
 
@@ -203,12 +198,10 @@ int livetime_checks(int runNumber)
     for(int ich = 0; ich<numHits; ich++)
     {
       int channelNum = channel->at(ich);
-      int chanKey = channelNum - channelNum%2;
-      // hiLoHit->at(ich) = (eventHi[chanKey] + eventLo[chanKey]);
-      // hiLoHit->at(ich) = (2*eventHi[chanKey] + eventLo[chanKey] - 1);
+      std::string name = detName->at(ich);
 
-      hiLoHit->at(ich) = (eventChans[chanKey]);
-      hitCount->at(ich) = eventCount[chanKey];
+      hiLoHit->at(ich) = eventChans[name] - 1;  // must subtract the 1 only once (at end)
+      hitCount->at(ich) = eventCount[name];
       // subtracting 1 from this makes is 0:HG-only, 1:LG-only, 2: both
     }
 
