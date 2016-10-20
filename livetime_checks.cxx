@@ -17,6 +17,10 @@
 #include "TFile.h"
 #include "TStopwatch.h"
 
+#pragma link C++ class std::map<int, std::map<int,int> >
+#pragma link C++ class std::map<int, std::map<int,vector<int> >
+#pragma link C++ class std::map<int, std::vector<int> >
+
 // #include "GATDataSet.hh"
 // #include "MJTChannelMap.hh"
 // #include "TClonesArray.h"
@@ -24,12 +28,13 @@
 // #include "GATUtils.hh"
 
 
-int livetime_checks(int runNumber)
+int livetime_checks(int runNumber, double threshold = 8.0)
 {
   std::cout << "Beginning 'livetime_checks.cxx' analysis" << std::endl;
   TStopwatch timer;
 	timer.Start();
 
+  // double threshold = 8.0;
   // gROOT->ProcessLine(".x $MGDODIR/Majorana/LoadMGDOMJClasses.C");
   // gROOT->ProcessLine(".x $GATDIR/LoadGATClasses.C");
 
@@ -43,6 +48,7 @@ int livetime_checks(int runNumber)
   std::cout << "Defining TTrees..." << std::endl;
   TChain* ch = new TChain("mjdTree","mjdTree");
   TTree* skimTree = new TTree("skimTree","skimTree"); // my own "skim tree"
+  TTree* auxTree = new TTree("auxTree","auxTree"); // for auxilliary data
 
   std::cout << "Touching status file..." << std::endl;
   char *cmd = new char[100];
@@ -69,11 +75,24 @@ int livetime_checks(int runNumber)
 
   // additionally, I'll use some of the same variables on the output, as well
   // as calculating some of my own
-  vector<int>* hiLoHit = 0;
+  vector<int>* hiLoHit = 0;       // this variable is boolean
+  vector<int>* hiLoHitD = 0;      // this is number high minus number low
   vector<int>* hitCount = 0;
   vector<int>* hg = 0;
   vector<int>* lg = 0;
   vector<double>* dT = 0;
+
+  // and some other aux variables that are more broad
+  std::map<float,double> timesChan;		// total times for each channel
+  std::map<int, int> problemPeriods;		// how many total times we had problems (could be more than once per run)
+  std::map<int, int> zeros;			// did I see 0 events in a complete run
+  std::map<int, int> gapCount;				// gapCount[detName] = number of times in run that gap exceeded threshold
+  std::map<int, double> gapCumulative;	// gapCumulative[channel] = cumulative gap size of gaps>thresh for run
+  std::map<int, std::vector<int> >	badStart;	// badStart[channel].size() is the runs with bad starts (long gaps at beginning)
+  std::map<int, std::vector<int> >	badStop;	// badStop[channel].size() is the runs with bad endings (long gaps at end)
+
+  std::vector<unsigned int> eventCount;
+  std::map<int,double> cumulative;		// total channel cumulative gaptime over all runs
 
 
   MJTChannelMap *chmap = ds.GetChannelMap();
@@ -97,7 +116,16 @@ int livetime_checks(int runNumber)
   for(int iCh=0; iCh<numChannels; iCh++)
   {
     int ch = IDs[iCh];
-    lastTimestamp[ch] = 0;
+    lastTimestamp[ch] = 0.0;
+
+    // gap counting variables
+    problemPeriods[ch] = 0.0;
+    zeros[ch] = 0;
+    timesChan[ch] = 0;
+    eventCount.push_back(0);		//sets all `numChannels` channels to 0 events to begin with
+    cumulative[ch] = 0;
+    gapCount[ch] = 0;
+    gapCumulative[ch] = 0;
   }
 
   std::cout << "Automatically filled the ID list to include all enabled channels for dataset" << std::endl;
@@ -120,7 +148,7 @@ int livetime_checks(int runNumber)
   // variables I'll want to put back into my skim files
   std::cout << "Branching the output skim tree..." << std::endl;
 
-
+  // stock (unchanged, just skimmed) variables
   skimTree->Branch("run",&run_p);
   skimTree->Branch("timestamp",&timestamp);
   skimTree->Branch("channel",&channel);
@@ -129,15 +157,29 @@ int livetime_checks(int runNumber)
   skimTree->Branch("trapENFCal",&trapENFCal);
   skimTree->Branch("trapENFDBSGCal",&trapENFDBSGCal);
   skimTree->Branch("detName",&detName);
-  skimTree->Branch("startTime", &startTime);
-  skimTree->Branch("stopTime", &stopTime);
+  // skimTree->Branch("startTime", &startTime);
+  // skimTree->Branch("stopTime", &stopTime);
+
   // calculated vars
-  skimTree->Branch("runtime",&runTime);
+  // skimTree->Branch("runtime",&runTime);
   skimTree->Branch("hiLoHit",&hiLoHit);
+  skimTree->Branch("hiLoHitD",&hiLoHitD);
   skimTree->Branch("hitCount",&hitCount);
   skimTree->Branch("hg",&hg);
   skimTree->Branch("lg",&lg);
   skimTree->Branch("dT",&dT);
+
+  // aux tree
+  auxTree->Branch("problemPeriods",&problemPeriods);
+  auxTree->Branch("zeros",&zeros);
+  auxTree->Branch("gapCount",&gapCount);
+  auxTree->Branch("gapCumulative",&gapCumulative);
+  auxTree->Branch("badStart",&badStart);
+  auxTree->Branch("badStop",&badStop);
+  auxTree->Branch("IDs",&IDs);
+  auxTree->Branch("runTime",&runTime);
+  auxTree->Branch("startTime",&startTime);
+  auxTree->Branch("stopTime",&stopTime);
 
   std::cout << "Branch addresses defined" << std::endl;
 
@@ -157,7 +199,7 @@ int livetime_checks(int runNumber)
       {std::cout << "  got event: " << iEvent << std::endl;}
 
     std::map<std::string,int> eventChans; // eventChans[hiChan] gives the number of events in hi/lo for detector
-    std::map<std::string,int> eventCount;
+    std::map<std::string,int> eventCount; // eventCount[detName] is num hits for a given det in a given event
     std::map<std::string,int> eventHi;  // eventHi[hiChan]
     std::map<std::string,int> eventLo;  // eventLo[hiChan]
 
@@ -168,6 +210,7 @@ int livetime_checks(int runNumber)
     hg->resize(numHits);
     lg->resize(numHits);
     hiLoHit->resize(numHits);
+    hiLoHitD->resize(numHits);
     hitCount->resize(numHits);
     dT->resize(numHits);
     for(int ich = 0; ich<numHits; ich++)
@@ -181,15 +224,26 @@ int livetime_checks(int runNumber)
 
       eventCount[name] += 1;
       eventChans[name] += 2*lg->at(ich) + hg->at(ich); // 0:HG-only, 1:LG-only, 2: both
-      // eventHi[chanKey] += hg->at(ich);
-      // eventLo[chanKey] += lg->at(ich);
+      eventHi[name] += hg->at(ich);
+      eventLo[name] += lg->at(ich);
 
       if(iEvent%10000==0)
         {std::cout << "    found channel " << channelNum << std::endl;}
 
       // calculate the time difference between the last event
-      dT->at(ich) = timestamp->at(ich)*1e-8 - lastTimestamp[channelNum];
-      lastTimestamp[channelNum] = timestamp->at(ich)*1e-8;
+      dT->at(ich) = timestamp->at(ich)*1e-8 - lastTimestamp.at(channelNum);
+
+      // std::cout << "dT was " << dT->at(ich) << ", writing new last timestamp" << std::endl;
+      lastTimestamp.at(channelNum) = timestamp->at(ich)*1e-8;
+
+      // std::cout << "looking inside threshold" << std::endl;
+      if(dT->at(ich) > threshold)
+      {
+        gapCount.at(channelNum)      += 1;
+        gapCumulative.at(channelNum) += dT->at(ich); // gapCumulative[(int)runNumber][channel] += diff;
+        cumulative.at(channelNum)    += dT->at(ich);
+        problemPeriods.at(channelNum)   += 1;
+      }
     }
 
     if(iEvent%10000==0)
@@ -200,13 +254,19 @@ int livetime_checks(int runNumber)
       int channelNum = channel->at(ich);
       std::string name = detName->at(ich);
 
-      hiLoHit->at(ich) = eventChans[name] - 1;  // must subtract the 1 only once (at end)
+      // hiLoHit->at(ich) = eventChans[name] - 1;  // must subtract the 1 only once (at end)
+      int ll = eventLo[name]>0?1:0;
+      int hh = eventHi[name]>0?1:0;
+
+      hiLoHit->at(ich) = (hh==ll);
+      hiLoHitD->at(ich) = hh-ll;
       hitCount->at(ich) = eventCount[name];
       // subtracting 1 from this makes is 0:HG-only, 1:LG-only, 2: both
     }
 
     skimTree->Fill();
     hiLoHit->clear();
+    hiLoHitD->clear();
     hitCount->clear();
     dT->clear();
     hg->clear();
@@ -217,6 +277,9 @@ int livetime_checks(int runNumber)
     eventLo.clear();
   }
   skimTree->Write();
+
+  auxTree->Fill();
+  auxTree->Write();
 
   sprintf(cmd,"rm /global/u2/s/sjmeijer/status-hiLo/%d",runNumber);
   gSystem->Exec(cmd);
